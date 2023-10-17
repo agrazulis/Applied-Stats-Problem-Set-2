@@ -1,0 +1,454 @@
+---
+title: "Problem Set 2"
+author: "Alexander Grazulis"
+fontfamily: mathpazo
+output:
+  pdf_document:
+    toc: true
+  fig_caption: yes
+  highlight: haddock
+  number_sections: true
+  df_print: paged
+fontsize: 10.5pt
+editor_options:
+chunk_output_type: console
+---
+```{r, echo=FALSE, warning=FALSE, message= FALSE}
+rm(list=ls(all=TRUE))
+rm(list=ls(all=TRUE))
+library(tm)
+library(SnowballC)
+library(lda)
+library(topicmodels)
+library(LDAvis)
+library(dplyr)
+library(stringi)
+library(plyr)
+library(foreign)
+library(xts)
+library(tis)
+library(jsonlite)
+library(FNN)
+library(hexbin)
+library(RColorBrewer)
+library(MASS)
+library(ldatuning)
+library(gofastr)
+library(quantmod)
+library(tseries)
+library(foreign)
+library(forecast)
+library(MASS)
+library(TTR)
+library(vars)
+library(readtext) 
+library(tidyr) 
+library(scales)
+library(tinytex)
+library(fitdistrplus)
+library(rgl)
+library(nlme)
+library(ggplot2)
+library(fitdistrplus)
+library(boot)
+library(pastecs)
+library(car)
+library(sns)
+library(olsrr)
+library(AER)
+library(broom)
+library(PoEdata)
+library(leaps)
+library(psych)
+library(caret)
+library(lmtest)
+library(Hmisc)
+```
+
+##############
+# I. Problem 1
+##############
+```{r}
+
+data <- read.csv("train.csv")
+my_data <- data[ , c("SalePrice", "LotFrontage", "LotArea", "BsmtFinSF1", 
+                     "BsmtFinSF2", "BsmtUnfSF", "X1stFlrSF", "X2ndFlrSF",
+                     "GrLivArea", "GarageArea", "WoodDeckSF")]
+my_data[is.na(my_data)] <- 0
+test_data<-read.csv("test.csv")
+```
+REMARK: The ten variables I am selecting to explain changes in the variable SalePrice are as follows: "LotFrontage", "LotArea", "BsmtFinSF1", "BsmtFinSF2", "BsmtUnfSF", "X1stFlrSF", "X2ndFlrSF", "GrLivArea", "GarageArea",  and "WoodDeckSF". I selected these values as I wanted to isolate the effect only physical characteristics of the home and property. I thought that although this might not yield the best model, it would allow to me isolate the important physical variables, and then I could run another model of ten variables that looks at more intangible characteristics like neighborhood type and general zoning classification which impact home prices but are not directly related to the physical size or shape of the home.
+
+## (a)
+```{r}
+#5 number summary for all variables as a part of descriptive statistics
+summary(my_data) 
+```
+```{r}
+#setting optimal bin width 
+n=1460 
+k=1+log2(n) 
+
+hist(my_data$SalePrice, breaks="FD") 
+#For our SalePrice variable we see a fairly right skewed distribution with most
+#values occurring around 100,000-150,000. 
+#We will consider a log transformation.
+
+hist(my_data$LotFrontage, breaks=k) 
+#using k breaks showed the distributions trend more clearly
+qqPlot(my_data$LotFrontage, main="Q-Q Plot for LotFrontage") 
+#This appears to have disagreement in the tails. The upper tail
+#specifically is giving us more issues because all of the observations beyond 
+#1 standard deviation occur outside of normal distribution. By looking at the 
+#histogram we can see why this is occurring because of the fairly skewed shape
+#of our distribution. We will consider a transformation
+
+hist(my_data$BsmtFinSF1, breaks="FD", freq=FALSE, ylim=c(0,.0018))
+lines(density(my_data$BsmtFinSF1,lwd = 2, col ="red")) 
+#This density plot shows us a right skewed distribution which makes sense with
+#a variable like BsmtFinSF1 because we expect the largest number of observations
+#to occur close to 0, and then slowly decrease in number as square footage 
+#increases. We will consider a transformation due to this distribution.
+
+hist(my_data$BsmtFinSF2, breaks="FD", col="red")
+#We see that this plot is extremely right skewed in that almost every 
+#observation occurs within the first bar, and all subsequent observations are 
+#very limited in terms of numbers so we don't see a gradual "step-down" as 
+#we move right along this graph. We will consider a transformation.
+
+qqPlot(my_data$BsmtFinSF2, main="Q-Q Plot for LotFrontage") 
+#this is a qqplot confirming the exact observation from our histogram
+
+hist(my_data$BsmtUnfSF, breaks="FD", freq=FALSE, ylim=c(0,.0015)) 
+#Shows a bit of right skew in the distribution. I adjusted the limit and bin 
+#width to show this adequately. We will need to consider a transformation,
+#but this data is more closely resembling a normal distribution than others.
+lines(density(my_data$BsmtUnfSF,lwd = 2))
+
+truehist(my_data$X1stFlrSF, ylim=c(0,.0015), main="Histogram for X1stFlrSF") 
+#similar to most of our data we see that this true histogram appears to be right
+#skewed but not by nearly as much as other variables. In fact, this appears to 
+#follow a normal distribution more closely than any previous variables.
+
+hist(my_data$X2ndFlrSF, breaks="FD") 
+#This histogram shows a very unique distribution in that the vast majority of 
+#observations occur between 0-100, but then for all subsequent observations 
+#beyond this point we see a fairly normal distribution.
+#We will need to consider a transformation.
+
+boxplot(my_data$X2ndFlrSF, main="X2ndFlrSF") 
+#this boxplot confirms the fact that we have an extremely unusual distribution
+#and will need some sort of transformation to make this variable workable.
+
+hist(my_data$GrLivArea, breaks="FD", freq=FALSE) 
+#this density histogram shows another right skewed distribution, but in this
+#case we see a much more equitable spread around the peak of 1,500. 
+#Although it is not terribly skewed we will still consider transforming.
+
+lines(density(my_data$GrLivArea,lwd = 2))
+qqPlot(my_data$GrLivArea, main="Q-Q Plot for GrLivArea") 
+#this qqplot shows similar trends on both the lower and upper tail, which is 
+#an upward trend away from the normally distributed reference line .
+
+hist(my_data$GarageArea, breaks="FD") 
+#this histogram shows a little right skew, but also has a partial semblance of
+#a normal distribution and therefore we could possibly maybe be okay without
+#a transformation.
+
+hist(my_data$WoodDeckSF, breaks="FD", freq=FALSE) 
+#This histogram shows a large cluster of observations occurring right around 
+#0-50, which makes sense because it is likely that many individuals do not 
+#have a wooddeck and if they do it could be relatively small. We will therefore
+#consider a transformation.
+
+lines(density(my_data$WoodDeckSF,lwd = 2))
+qqPlot(my_data$WoodDeckSF, main="Q-Q Plot for WoodDeckSF") 
+#This is a very odd looking qqplot and it shows that the data only follows the
+#reference line in quantile 1. We also notice a slight s-shaped in the
+#observation cluster.
+```
+
+## (b)
+```{r}
+summary(a3 <- powerTransform(cbind(LotFrontage, LotArea, BsmtFinSF1, BsmtFinSF2,
+                                BsmtUnfSF, X1stFlrSF, X2ndFlrSF, GrLivArea,
+                                GarageArea, WoodDeckSF) ~ 1, data=my_data, 
+                             family="yjPower")) 
+#Checking for transformations of each variable 
+
+transformedY <- yjPower(with(my_data, cbind(LotFrontage, LotArea, BsmtFinSF1,
+                                            BsmtFinSF2, BsmtUnfSF, X1stFlrSF, 
+                                            X2ndFlrSF, GrLivArea, GarageArea, 
+                                            WoodDeckSF)),
+coef(a3, round=TRUE)) 
+#This is transforming the variables based on what was recommended transformation
+
+#Saving Transformed, indexed variables so we can put into new data frame
+transformedYLotFrontage<-transformedY[, 1]
+transformedYLotArea<-transformedY[, 2]
+transformedYBsmtFinSF1<-transformedY[, 3]
+transformedYBsmtSF2<-transformedY[, 4]
+transformedYBsmtUnfSF<-transformedY[, 5]
+transformedYX1stFlrSF<-transformedY[, 6]
+transformedYX2ndFlrSF<-transformedY[, 7]
+transformedYGrLivArea<-transformedY[, 8]
+transformedYGarageArea<-transformedY[, 9]
+transformedYWoodDeckSF<-transformedY[, 10]
+
+transformedYSalePrice <- log(my_data$SalePrice) #Log transforming SalePrice
+
+df_transformedY <- data.frame(cbind(transformedYSalePrice,transformedYLotFrontage,transformedYLotArea,transformedYBsmtFinSF1,transformedYBsmtSF2,transformedYBsmtUnfSF,transformedYX1stFlrSF,transformedYX2ndFlrSF,transformedYGrLivArea,transformedYGarageArea,transformedYWoodDeckSF)) 
+#Saving transformed variables into new data frame
+```
+Remark: I chose to apply the suggested transformations to all my variables except I hard-coded a log transformation to my dependent variable SalePrice. It is worth noting that I could have also hard-coded a log transformation for the variables LotArea & X2ndFlrSF as the suggested transformation for these two variables was close to 0. Applying the exact power transformation to the independent variables will increase accuracy, but likely hurt our ability to easily interpret the estimates. 
+
+## (c)
+```{r}
+base.mod <- lm(transformedYSalePrice ~ transformedYLotFrontage + 
+                 transformedYLotArea + transformedYBsmtFinSF1 + 
+                 transformedYBsmtSF2 + transformedYBsmtUnfSF + 
+                 transformedYX1stFlrSF + transformedYX2ndFlrSF + 
+                 transformedYGrLivArea + transformedYGarageArea + 
+                 transformedYWoodDeckSF, data=my_data)
+S(base.mod)
+
+Confint(base.mod) 
+#1st floor square footage has confidence interval that crosses 0 bad for 
+#regression because there is no clear trend
+```
+Remark: We see that transformedYLotFrontage has a p-value that is slightly above the significance level of 0.05 and transformedYBsmtSF2 has a p-value that is extremely high. Both indicating that they are likely statistically insignificant predictors. We also confirm that their confidence intervals cross the zero value indicating no statistical significance. All other estimates show statistical significance at all levels. I chose to leave in the predictors with insignificant effects (high p-values) because we have a relatively large sample. By applying the transformations above we improve accuracy, but sacrifice the interpretability of our coefficients. Therefore, my below interpretations do not include the exact transformation interpretations, but rather just reference the transformed variables as is.
+
+Interpretations:
+A unit change in our transformedYLotFrontage will lead to approximately on average a -0.03% change in transformedYSalePrice.
+A unit change in our transformedYLotArea will lead to approximately on average a 3.27% change in transformedYSalePrice.
+A unit change in our transformedYBsmtFinSF1 will lead to approximately on average a 1.06% change in transformedYSalePrice.
+A unit change in our transformedYBsmtFinSF2 will lead to approximately on average a -3.31% change in transformedYSalePrice.
+A unit change in our transformedYBsmtUnfSF will lead to approximately on average a 0.13% change in transformedYSalePrice.
+A unit change in our transformedYX1stFlrSF will lead to approximately on average a -5.80% change in transformedYSalePrice.
+A unit change in our transformedYX2ndFlrSF will lead to approximately on average a -3.08% change in transformedYSalePrice.
+A unit change in our transformedYGrLivArea will lead to approximately on average a 27.59% change in transformedYSalePrice.
+A unit change in our transformedYGarageArea will lead to approximately on average a 0.12% change in transformedYSalePrice.
+A unit change in our transformedYWoodDeckSF will lead to approximately on average a 2.37% change in transformedYSalePrice.
+
+## (d)
+```{r}
+influencePlot(base.mod) #testing for influential observations
+
+base.mod.nout<-update(base.mod, subset=-c(524, 1299)) 
+#Removing the 4 influential observations
+summary(base.mod.nout)
+```
+Remark: I utilized the influencePlot() function which printed 3 influential observations and from the plot we can see that they are all outliers and high leverage. All the observations except for #363 were shown to have a large influence on the model, which is noted by the small density of that observations circle. As a result, I decided to remove all the observations except for #363. Once these outliers were removed we also saw an increase in the predictive power of our model. 
+
+## (e)
+```{r}
+#Creating mallows cp function
+mallows_cp = function(model1, model2){
+  n = nrow(model1$model)
+  p1 = length(coef(model1))
+  p2 = length(coef(model2))
+  if(p2<p1) 
+    stop('You have interchanged the full model and the subset model', 
+         call. = FALSE)
+  sum(resid(model1)**2) / sum(resid(model2)^2) *(n-p2) + 2 * p1 -n
+}
+
+#Creating function to replicate step(), but use mallows cp instead of AIC
+mystep = function(object){
+  reduced_object = object
+  old_mcp = mallows_cp(object, object)
+  while(TRUE){
+    nms = attr(terms(reduced_object),"term.labels")
+    u = lapply(nms, function(x) update(reduced_object, paste0(".~ .-", x)))
+    mcp = sapply(u, mallows_cp, object) 
+    # same as sapply(u, function(x) mallows_cp(x, object))
+    if(min(mcp) > old_mcp) break
+    old_mcp = min(mcp)
+    reduced_object = u[[which.min(mcp)]]
+  }
+  reduced_object
+} 
+
+final.model<-mystep(base.mod.nout) #Saving new model with removed variable
+
+summary(final.model)
+
+vif(final.model) 
+#looking for multicollinearity between the variables in the final model without transformedYBsmtFinSF2
+
+mcollin1<-lm(transformedYSalePrice~transformedYLotFrontage + 
+               transformedYLotArea + transformedYBsmtFinSF1 + 
+               transformedYBsmtUnfSF + transformedYGrLivArea + 
+               transformedYGarageArea + transformedYWoodDeckSF, 
+             subset=-c(524, 1299), data=my_data)
+vif(mcollin1) 
+#testing multicollinearity for model without transformedYBsmtFinSF2, 
+#transformedYX1stFlrSF, transformedY2ndFlrSF
+final.model<-mcollin1 
+#saving the model that removed 3 variables and outliers as my final.model.
+```
+Remark: Using this created mystep() function gives us the best model using Mallows Cp, instead of AIC which the built-in step() function uses. This analysis identified that transformedYBsmtFinSF2 was not a necessary predictor in our model. This estimate does not account for multicollinearity though and it appears that there is very high multicollinearity between some variables when we run our first VIF. When I remove the variables transformedYX1stFlrSF and transformedYX2ndFlrSF, then run VIF again we see that this multicollinearity is eliminated and all the results are substantially below a value of 4. Intuitively, I removed both the 1st and 2nd floor square footage predictors because I realized they would of course be highly colinear with above ground square footage (GrLivArea) since they are essentially measuring the same thing. As I moved along in this modeling process, I realized how poor my variable selection was, but it allowed me to adequately piece together where my model was flawed and justify the removal of unnecessary variables which was a good exercise. Although I was apprehensive to remove predictors, I realized due to this extreme redundancy I could explain SalePrice equally as well with fewer predictors in the model.
+
+## (f)
+```{r}
+#plotting residuals against y
+plot(final.model$residuals,pch=1, ylab="Residuals", ylim=c(-2,2),
+     main="Residuals vs. Y") 
+
+abline(h=0 ,lwd=2, col="red")
+```
+Remark: These results are promising in that they shows a fairly even spread of residuals around a value of 0.
+
+## (g)
+```{r}
+AIC(base.mod, final.model) #Checking AIC of base.mod vs final.model
+BIC(base.mod, final.model) #Checking BIC of base.mod vs. final.model
+```
+Remark: My final model is a better model since we observe smaller AIC and BIC values, which makes sense considering we removed influential observations and the transformed variables BsmtFinSF2, X1stFlrSF, and X2ndFlrSF. That being said, it is clear this choice of predictors was quite poor.
+
+## (h)
+```{r}
+model_interactions = lm(transformedYSalePrice ~ (transformedYLotFrontage 
+                                + transformedYLotArea + transformedYBsmtFinSF1
+                                + transformedYBsmtUnfSF + transformedYGrLivArea
+                          + transformedYGarageArea + transformedYWoodDeckSF)^2,
+                        data=my_data, subset=-c(524, 1299))
+
+final.model_interactions<-mystep(model_interactions) 
+#using mystep() function to eliminate any unneeded terms from our model
+vif(final.model_interactions) 
+#testing for multicollinearity within this final model including interactions
+summary(final.model_interactions)
+resettest(final.model_interactions, power=2, type="regressor") #ResetTest
+```
+Remark: Given my choice of predictors in this case, it is clear my model is quite bad at predicting SalePrice. In regard to the final model with interactions included, we see it has an extremely high level of multicollinearity between many of the variables which makes sense given the closeness in my predictors and the inclusion of interaction. That being said, the adjusted R-squared value is higher in this final model with interactions, than compared to my two previous models. Also, we know that multicollinearity doesn't directly affect the predictive power of my model, but rather the ability to isolate effects. The RESET test shows that my model is misspecified, and that there may be some value in having higher power terms. That said, we know that if we have to raise terms to anything beyond a quadratic, lets say a cubic, it means that our variables are likely the issue, which in my case makes sense given previous analysis of my predictors.
+
+## (i)
+```{r}
+#Using AIC and BIC to pick model
+AIC(base.mod, base.mod.nout, final.model, model_interactions,
+    final.model_interactions)
+
+BIC(base.mod, base.mod.nout, final.model, model_interactions,
+    final.model_interactions)
+```
+Remark: We pick the final model with interactions based on these results. 
+```{r}
+#Cross-Validation 
+#We aren't given any Sale Price values in test.data
+set.seed(1)
+training.samples <- df_transformedY$transformedYSalePrice %>%
+  createDataPartition(p=0.8, list=FALSE)
+train.data <- df_transformedY[training.samples, ]
+test.data <- df_transformedY[-training.samples, ]
+
+train_model <- lm(transformedYSalePrice ~., data = train.data)
+
+predictions <- train_model %>% predict(test.data)
+data.frame(
+  RMSE=RMSE(predictions, test.data$transformedYSalePrice),
+  R2=R2(predictions, test.data$transformedYSalePrice)
+  ) 
+```
+Remark: Overall we find that this model does a moderate job at predicting sale price for our data set, but that it is likely overfit for our specific data set. We know that this final.model_interactions performs better than the previously identified models, given the low AIC and BIC values comparatively to other models and a higher R-squared. That being said, I realize I could have picked much better predictor variables that aren't so similar, which is why after all my analysis so many of the initial variables were excluded (not necessarily interactions between such variables though). It is worth noting that I had quite a small RMSE, which is promising as it means my model fits well to this data. 
+
+##############
+# II. Problem 2
+##############
+
+```{r}
+data2<-read.csv("german_healthcare_usage.csv")
+#data2
+my_data2 <- data2[ , c("DOCVIS", "FEMALE", "AGE", "UNEMPLOY", "MARRIED", 
+                    "HANDPER", "EDUC", "HHNINC", "HOSPVIS", "PRESCRIP", "YEAR")]
+attach(my_data2)
+#my_data2
+```
+
+## (a)
+```{r}
+#Creating a baseline model without transformations
+my_model <- lm(DOCVIS ~ AGE+UNEMPLOY+MARRIED+HANDPER+HHNINC+
+                 HOSPVIS+EDUC+FEMALE, data=my_data2) 
+
+summary(my_model)
+
+#CHECKING FOR TRANSFORMATIONS
+hist(my_data2$DOCVIS, breaks="FD") #Very right skewed so likely need to transform 
+hist(my_data2$AGE) #Likely need to transform
+hist(my_data2$HANDPER) #Likely need to transform
+hist(my_data2$HHNINC, breaks="FD") #No need to transform
+hist(my_data2$EDUC) #No need to transform
+
+#Checking appropriate transformations for variables
+summary(a4 <- powerTransform(cbind(AGE, HANDPER)~1, my_data2, family="yjPower")) 
+#Applying appropriate transformations
+trans_my_data2 <- yjPower(with(my_data2, cbind(AGE,HANDPER))
+                          ,coef(a4, round=TRUE)) 
+trans_AGE <- trans_my_data2[, 1]
+trans_HANDPER <- trans_my_data2[, 2]
+
+trans_DOCVIS <- log(DOCVIS+1) #Adding constant so we get no undefined values
+trans.df_my_data2<- data.frame(cbind(trans_DOCVIS, trans_AGE, trans_HANDPER, 
+                                     AGE, UNEMPLOY, HOSPVIS, EDUC, FEMALE, 
+                                     my_data2$MARRIED)) 
+#Creating data frame with transformed variables and untransformed variables
+
+trans_my_model <- lm(trans_DOCVIS ~ trans_AGE+trans_HANDPER+my_data2$MARRIED+HHNINC+HOSPVIS+EDUC+FEMALE+UNEMPLOY, data=trans.df_my_data2) #Creating model with transformed variables
+
+vif(my_model) 
+#Checking for multicollinearity in baseline model
+vif(trans_my_model) 
+#Checking for multicollinearity in model with transformations
+AIC(trans_my_model, my_model)
+BIC(trans_my_model, my_model)
+```
+Remark: Firstly, I chose this set of predictors because in learning from my mistakes in variable selection from problem 1, I realized the variables of choice should try and encompass a wide variety of factors effecting doctor visits instead of trying to isolate specific characteristics that are similar to one another (this leads to multicollinearity and other issues). That said, these variables seemed to encompass important factors of doctor visits. Also, all my predictors showed statistical significance at some level at or below 10%. The variable "MARRIED" is the one variable that showed only significance at the 10% level which we might intuitively expect when comparing it to the strength of our other predictors in estimating the number of doctor visits. Also, it was promising that there were no levels of multicollinearity shown that were even close to 4, in fact every variable was below a value of 2 when running VIF on my model. I also performed a log transformation to the variable "DOCVIS", and power transformations to "AGE" & "HANDPER", which strengthened the models performance, and actually didn't sacrifice all to much in terms of interpretability. Lastly, it is important to mention the low $\\{R^2}\\$ (multiple & adjusted) because typically it would be alarming but since we are working with panel data we expect this to be the case because of the immense heterogeneity of cross sections. 
+
+## (b)
+```{r}
+#Differences in Differences: In 1987 the German Government passed a series of
+#legislation to improve healthcare access for unemployed people and women.
+#i. Determine whether or not the policy worked for women. 
+my_data2$YEAR <- ifelse(my_data2$YEAR >= 1987, 1, 0) 
+#Creating dummy variables: 1 is YEAR 1987+, 0 is anything before YEAR 1987
+
+#creating difference in difference estimator
+DiD <- my_data2$FEMALE*my_data2$YEAR 
+#Creating model with interaction (DiD)
+my_model2 <- lm(trans_DOCVIS ~ trans_AGE+trans_HANDPER+my_data2$MARRIED+HHNINC+HOSPVIS+EDUC+FEMALE+
+                  UNEMPLOY+DiD, data=trans.df_my_data2) 
+summary(my_model2)
+```
+Remark: Here we see that the policy yielded approximately on average a -2.31% change in doctor visits for females post 1987, but this result was not statistically significant at any level. Therefore we fail to conclude a statistically significant effect on the policy for women. 
+```{r}
+#ii. Determine whether or not the policy worked for unemployed.
+DiD_2 <- my_data2$UNEMPLOY*my_data2$YEAR
+my_model3 <- lm(trans_DOCVIS ~ trans_AGE+trans_HANDPER+my_data2$MARRIED+HHNINC+HOSPVIS+EDUC+FEMALE+UNEMPLOY+DiD_2, data=trans.df_my_data2) 
+summary(my_model3)
+```
+Remark: Here we see that after the policy there was approximately on average a -4.44% change in doctor visits for those who are unemployed. This result was statistically significant at the 5% level and therefore we can conclude (at that level) there is a negative effect on unemployed individuals from this policy as there was a 4.44% decrease in number of doctor visits after 1987. 
+
+## (c)
+```{r}
+my_data3<-na.exclude(my_data2) #excluding NA's
+#Test the hypothesis that the number of doctor visits a patient 
+#has over a 3 month period is greater for women than for men.
+model_4 <- lm(DOCVIS~FEMALE, my_data3)
+#Creating model with doctor visits regressed on gender 
+print(model_4)
+anova(update(model_4,.~.-FEMALE),model_4) 
+```
+Remark: Since the p-value is less than 0.05 we can conclude that there is a difference between the number of doctor visits for females comparatively to males. We see that our coefficient states there is approximately on average a 1.17 unit increase in doctor visits for females.
+
+## (d)
+```{r}
+#Based on your findings propose and test your own hypothesis of interest.
+#My Hypothesis: The Number of doctor visits a patient has over a 3 month
+#period is greater for unemployed than employed.
+model_5 <- lm(DOCVIS~UNEMPLOY, my_data3) 
+#Creating model with doctor visits regressed on employment condition
+print(model_5)
+anova(update(model_5,.~.-UNEMPLOY),model_5)
+```
+Remark: Since the p-value is less than 0.05 we can conclude that there is a difference between the number doctor visits for those who are unemployed compared to those who are employed. We see that our coefficient shows that there is approximately on average a 1.49 unit increase in doctor visits for unemployed individuals. 
